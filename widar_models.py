@@ -1,6 +1,7 @@
 """Model architectures for Widar gesture classification."""
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class GestureCNN(nn.Module):
@@ -77,9 +78,6 @@ class GestureResNet(nn.Module):
         x = self.layer3(x)
         return self.head(x)
 
-import torch
-import torch.nn as nn
-
 
 class CNNGRU(nn.Module):
     """Per-frame CNN encoder followed by a GRU over time.
@@ -140,3 +138,74 @@ class CNNGRU(nn.Module):
         else:
             h = h_n[-1]
         return self.head(h)
+
+class KerasGRU(nn.Module):
+    """GRU matching Keras (<=2.3) defaults: reset_after=False, sigmoid gates.
+    n = tanh(W x + U (r * h) + b)      <- reset applied BEFORE the recurrent matmul
+    h = z * h_prev + (1 - z) * n
+    nn.GRU applies the reset gate after the matmul, so it is NOT equivalent.
+    """
+    def __init__(
+            self, input_size, hidden_size
+            ):
+        super().__init__()
+        self.hs = hidden_size
+        self.W = nn.Parameter(torch.empty(input_size, 3 * hidden_size))   # kernel (z, r, h)
+        self.U = nn.Parameter(torch.empty(hidden_size, 3 * hidden_size))  # recurrent kernel
+        self.b = nn.Parameter(torch.zeros(3 * hidden_size))
+        nn.init.xavier_uniform_(self.W)                                    # glorot_uniform
+        for i in range(3):                                                 # orthogonal per gate
+            nn.init.orthogonal_(self.U.data[:, i * hidden_size:(i + 1) * hidden_size])
+ 
+    def forward(self, x):  # x: (B, T, F) -> last hidden state (B, H)
+        B, T, _ = x.shape
+        H = self.hs
+        h = x.new_zeros(B, H)
+        xw = x @ self.W + self.b                      # (B, T, 3H)
+        Uz, Ur, Uh = self.U[:, :H], self.U[:, H:2 * H], self.U[:, 2 * H:]
+        for t in range(T):
+            xz, xr, xh = xw[:, t].split(H, dim=-1)
+            z = torch.sigmoid(xz + h @ Uz)
+            r = torch.sigmoid(xr + h @ Ur)
+            n = torch.tanh(xh + (r * h) @ Uh)
+            h = z * h + (1 - z) * n
+        return h
+ 
+ 
+class Widar3Net(nn.Module):
+    def __init__(
+            self, 
+            T,
+            n_class, 
+            dropout=0.5, 
+            gru_units=128
+    ):
+        super().__init__()
+        self.conv = nn.Conv2d(1, 16, kernel_size=5)       # 20x20 -> 16x16 ('valid')
+        self.fc1 = nn.Linear(8 * 8 * 16, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.drop = nn.Dropout(dropout)
+        #self.gru = KerasGRU(64, gru_units)
+        self.gru = nn.GRU(64, gru_units, batch_first=True)
+        self.out = nn.Linear(gru_units, n_class)          # logits; softmax lives in the loss
+        for m in (self.conv, self.fc1, self.fc2, self.out):   # Keras init: glorot_uniform, zero bias
+            nn.init.xavier_uniform_(m.weight)
+            nn.init.zeros_(m.bias)
+ 
+    def forward(self, x):
+        # x: (B, T, 1, 20, 20)  [channels-first; Keras was (B, T, 20, 20, 1)]
+        B, T = x.shape[:2]
+        x = x.reshape(B * T, 1, 20, 20)                   # TimeDistributed == fold time into batch
+        x = F.max_pool2d(F.relu(self.conv(x)), 2)
+        x = x.flatten(1)
+        x = self.drop(F.relu(self.fc1(x)))
+        x = F.relu(self.fc2(x))
+        x = x.reshape(B, T, -1)
+        _, h = self.gru(x)
+        x = self.drop(h[-1])
+        return self.out(x)
+ 
+ 
+    def make_optimizer(model, lr=3e-4):
+        # Keras RMSprop: rho=0.9, epsilon=1e-7 (added outside the sqrt, same as PyTorch)
+        return torch.optim.RMSprop(model.parameters(), lr=lr, alpha=0.9, eps=1e-7)

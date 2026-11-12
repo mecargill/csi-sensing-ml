@@ -59,7 +59,7 @@ def load_sample(path, T=30):
     x = x.reshape(20, 20, -1) if x.size else np.zeros((20, 20, 0), np.float32)  # 1-frame clips are stored 2-D
     out = np.zeros((20, 20, T), np.float32)
     n = min(T, x.shape[2])
-    out[:, :, :n] = x[:, :, :n]
+    out[:, :, T-n:] = x[:, :, -n:]
     return out
 
 

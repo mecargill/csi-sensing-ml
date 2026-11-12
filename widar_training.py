@@ -22,8 +22,9 @@ def train_model(
     output_path: str,
     *,
     epochs: int = 10,
-    batch_size: int = 64,
+    batch_size: int = 32,
     seed: int = 0,
+    optimizer: torch.optim.Optimizer = None,
 ) -> nn.Module:
     """Load Widar data, train a model, and save its weights."""
     meta = widar_data.load_metadata()
@@ -31,8 +32,12 @@ def train_model(
     print(f"{len(meta)} samples of {len(COMMON_GESTURES)} gestures")
 
     X, y, classes = widar_data.load_arrays(meta)
+    #shape of X is (N, H, W, T) and we are changing it to (N, T, H, W)
     X = X.transpose(0, 3, 1, 2)
-    X /= X.max() + 1e-8
+    max = X.max(axis=(2, 3), keepdims=True)
+    min = X.min(axis=(2, 3), keepdims=True)
+    X = (X - min) / (max - min + 1e-8)
+    
 
     rng = np.random.default_rng(seed)
     indices = rng.permutation(len(X))
@@ -47,7 +52,10 @@ def train_model(
     model = model_factory(X.shape[1], len(classes)).to(device)
     print(f"{sum(parameter.numel() for parameter in model.parameters()):,} parameters")
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    if optimizer is None:
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    else:
+        optimizer = optimizer(model)
 
     def accuracy(indices):
         model.eval()
