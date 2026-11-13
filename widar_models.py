@@ -30,12 +30,13 @@ class GestureCNN(nn.Module):
 class ResidualBlock(nn.Module):
     """Convolutional block with a skip connection."""
 
-    def __init__(self, in_ch, out_ch, stride=1):
+    def __init__(self, in_ch, out_ch, stride=1, dropout=0.1):
         super().__init__()
         self.body = nn.Sequential(
             nn.Conv2d(in_ch, out_ch, 3, stride=stride, padding=1, bias=False),
             nn.BatchNorm2d(out_ch),
             nn.ReLU(),
+            nn.Dropout2d(dropout),
             nn.Conv2d(out_ch, out_ch, 3, padding=1, bias=False),
             nn.BatchNorm2d(out_ch),
         )
@@ -67,7 +68,7 @@ class GestureResNet(nn.Module):
         self.head = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(128, n_classes),
         )
 
@@ -138,38 +139,6 @@ class CNNGRU(nn.Module):
         else:
             h = h_n[-1]
         return self.head(h)
-
-class KerasGRU(nn.Module):
-    """GRU matching Keras (<=2.3) defaults: reset_after=False, sigmoid gates.
-    n = tanh(W x + U (r * h) + b)      <- reset applied BEFORE the recurrent matmul
-    h = z * h_prev + (1 - z) * n
-    nn.GRU applies the reset gate after the matmul, so it is NOT equivalent.
-    """
-    def __init__(
-            self, input_size, hidden_size
-            ):
-        super().__init__()
-        self.hs = hidden_size
-        self.W = nn.Parameter(torch.empty(input_size, 3 * hidden_size))   # kernel (z, r, h)
-        self.U = nn.Parameter(torch.empty(hidden_size, 3 * hidden_size))  # recurrent kernel
-        self.b = nn.Parameter(torch.zeros(3 * hidden_size))
-        nn.init.xavier_uniform_(self.W)                                    # glorot_uniform
-        for i in range(3):                                                 # orthogonal per gate
-            nn.init.orthogonal_(self.U.data[:, i * hidden_size:(i + 1) * hidden_size])
- 
-    def forward(self, x):  # x: (B, T, F) -> last hidden state (B, H)
-        B, T, _ = x.shape
-        H = self.hs
-        h = x.new_zeros(B, H)
-        xw = x @ self.W + self.b                      # (B, T, 3H)
-        Uz, Ur, Uh = self.U[:, :H], self.U[:, H:2 * H], self.U[:, 2 * H:]
-        for t in range(T):
-            xz, xr, xh = xw[:, t].split(H, dim=-1)
-            z = torch.sigmoid(xz + h @ Uz)
-            r = torch.sigmoid(xr + h @ Ur)
-            n = torch.tanh(xh + (r * h) @ Uh)
-            h = z * h + (1 - z) * n
-        return h
  
  
 class Widar3Net(nn.Module):
@@ -206,6 +175,57 @@ class Widar3Net(nn.Module):
         return self.out(x)
  
  
+    @staticmethod
     def make_optimizer(model, lr=3e-4):
         # Keras RMSprop: rho=0.9, epsilon=1e-7 (added outside the sqrt, same as PyTorch)
         return torch.optim.RMSprop(model.parameters(), lr=lr, alpha=0.9, eps=1e-7)
+
+class LSTM(nn.Module):
+    """Encode each BVP frame with a CNN, then classify the sequence with a BiLSTM."""
+
+    def __init__(
+        self,
+        T: int,  # Kept for compatibility with the shared model factory.
+        n_class: int,
+        feat_dim: int = 64,
+        lstm_units: int = 128,
+        dropout: float = 0.5,
+    ):
+        super().__init__()
+        self.frame_encoder = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=5, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.AdaptiveAvgPool2d((2, 2)),
+            nn.Flatten(),
+            nn.Linear(64 * 2 * 2, feat_dim),
+            nn.ReLU(),
+            nn.Linear(feat_dim, feat_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+        self.lstm = nn.LSTM(
+            input_size=feat_dim,
+            hidden_size=lstm_units,
+            batch_first=True,
+            bidirectional=False,
+        )
+        self.classifier = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(lstm_units, n_class),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Input: [batch, time, height, width]
+        B, T = x.shape[:2]
+        H, W = x.shape[2:]
+        frame_features = self.frame_encoder(x.reshape(B * T, 1, H, W))
+        sequence = frame_features.reshape(B, T, -1)
+        _, (hidden, _) = self.lstm(sequence)
+        final_hidden = hidden[-1]
+        return self.classifier(final_hidden)

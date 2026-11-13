@@ -89,4 +89,6 @@ def load_arrays(meta, T=30):
                           f"({completed / total:.0%}) - {timing}", flush=True)
     classes = sorted(meta.gesture.unique())
     y = meta.gesture.map({c: i for i, c in enumerate(classes)}).to_numpy()
+    #shape of X is (N, H, W, T) and we are changing it to (N, T, H, W)
+    X = X.transpose(0, 3, 1, 2)
     return X, y, classes
