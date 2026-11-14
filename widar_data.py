@@ -15,6 +15,16 @@ import numpy as np
 import pandas as pd
 import scipy.io
 
+#these are the only ones in room 3 - that means if we want to hold out room 3, we should only train on these
+COMMON_GESTURES = [
+    "Push&Pull",
+    "Sweep",
+    "Clap",
+    "Slide",
+    "Draw-O(H)",
+    "Draw-Zigzag(H)",
+]
+
 ROOT = Path(__file__).resolve().parent / "BVP"
 
 ROOM = {"20181109": 1, "20181112": 1, "20181115": 1, "20181117": 2, "20181118": 2, "20181121": 1,

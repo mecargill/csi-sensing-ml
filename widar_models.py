@@ -181,51 +181,34 @@ class Widar3Net(nn.Module):
         return torch.optim.RMSprop(model.parameters(), lr=lr, alpha=0.9, eps=1e-7)
 
 class LSTM(nn.Module):
-    """Encode each BVP frame with a CNN, then classify the sequence with a BiLSTM."""
-
     def __init__(
-        self,
-        T: int,  # Kept for compatibility with the shared model factory.
-        n_class: int,
-        feat_dim: int = 64,
-        lstm_units: int = 128,
-        dropout: float = 0.5,
+            self, 
+            T,
+            n_class, 
+            dropout=0.4, 
+            lstm_units=128
     ):
         super().__init__()
-        self.frame_encoder = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=5, bias=False),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
-            nn.AdaptiveAvgPool2d((2, 2)),
-            nn.Flatten(),
-            nn.Linear(64 * 2 * 2, feat_dim),
-            nn.ReLU(),
-            nn.Linear(feat_dim, feat_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-        )
-        self.lstm = nn.LSTM(
-            input_size=feat_dim,
-            hidden_size=lstm_units,
-            batch_first=True,
-            bidirectional=False,
-        )
-        self.classifier = nn.Sequential(
-            nn.Dropout(dropout),
-            nn.Linear(lstm_units, n_class),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Input: [batch, time, height, width]
+        self.conv = nn.Conv2d(1, 16, kernel_size=5)       # 20x20 -> 16x16 ('valid')
+        self.fc1 = nn.Linear(8 * 8 * 16, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.drop = nn.Dropout(dropout)
+        
+        self.lstm = nn.LSTM(64, lstm_units, batch_first=True)
+        self.out = nn.Linear(lstm_units, n_class)          # logits; softmax lives in the loss
+        for m in (self.conv, self.fc1, self.fc2, self.out):   # Keras init: glorot_uniform, zero bias
+            nn.init.xavier_uniform_(m.weight)
+            nn.init.zeros_(m.bias)
+ 
+    def forward(self, x):
+        # x: (B, T, 1, 20, 20)  [channels-first; Keras was (B, T, 20, 20, 1)]
         B, T = x.shape[:2]
-        H, W = x.shape[2:]
-        frame_features = self.frame_encoder(x.reshape(B * T, 1, H, W))
-        sequence = frame_features.reshape(B, T, -1)
-        _, (hidden, _) = self.lstm(sequence)
-        final_hidden = hidden[-1]
-        return self.classifier(final_hidden)
+        x = x.reshape(B * T, 1, 20, 20)                   # TimeDistributed == fold time into batch
+        x = F.max_pool2d(F.relu(self.conv(x)), 2)
+        x = x.flatten(1)
+        x = self.drop(F.relu(self.fc1(x)))
+        x = F.relu(self.fc2(x))
+        x = x.reshape(B, T, -1)
+        h, _ = self.lstm(x)
+        x = self.drop(h[:, -1, :])
+        return self.out(x)
