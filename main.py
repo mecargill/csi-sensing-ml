@@ -43,6 +43,7 @@ if __name__ == "__main__":
                     epochs=epochs, 
                     anneal=True, 
                     use_validation=False, 
+                    use_pre_parsed_data=True
                     )
     else:
         print(f"Invalid model choice: {model}")

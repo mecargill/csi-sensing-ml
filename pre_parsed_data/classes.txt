@@ -1,0 +1,6 @@
+Clap
+Draw-O(H)
+Draw-Zigzag(H)
+Push&Pull
+Slide
+Sweep

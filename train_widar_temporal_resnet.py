@@ -33,7 +33,7 @@ meta = meta[meta.gesture.isin(COMMON)].reset_index(drop=True)
 print(f"{len(meta)} samples of {len(COMMON)} gestures")
 
 X, y, classes = widar_data.load_arrays(meta)
-X = X.transpose(0, 3, 1, 2) / (X.max() + 1e-8)      # (N, 30, 20, 20) = (sample, time, vx, vy), scaled to [0, 1]
+X = X / (X.max() + 1e-8)      # (N, 30, 20, 20) = (sample, time, vx, vy), scaled to [0, 1]
 
 rng = np.random.default_rng(0)
 idx = rng.permutation(len(X))
@@ -125,7 +125,7 @@ model = TemporalResNet(n_classes=len(classes)).to(device)
 print(f"{sum(p.numel() for p in model.parameters()):,} parameters")
 
 # ----------------------------------------------------------------------------- 3 + 4. LOSS, OPTIMIZER
-BATCH, EPOCHS = 64, 30
+BATCH, EPOCHS = 64, 100
 steps_per_epoch = (len(train_idx) + BATCH - 1) // BATCH
 
 loss_fn = nn.CrossEntropyLoss()
