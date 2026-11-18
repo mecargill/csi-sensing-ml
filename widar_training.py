@@ -4,7 +4,7 @@ from typing import Callable, Optional
 import numpy as np
 import torch
 import torch.nn as nn
-
+import pandas as pd
 import widar_data as wd
 
 
@@ -17,12 +17,39 @@ def normalize(X):
     maximum = X.max(axis=(1, 2, 3), keepdims=True)
     return (X - minimum) / (maximum - minimum + 1e-8)
 
-
+"""
 def augment_data(X: torch.Tensor, noise_level: float = 0.01) -> torch.Tensor:
-    """Apply data augmentation to the input tensor X."""
+    ""Apply data augmentation to the input tensor X.""
     # In experiments, this augmentation has reduced performance.
     noise = torch.randn_like(X) * noise_level
-    return (X + noise).clamp(0.0, 1.0)
+    return (X + noise).clamp(0.0, 1.0)"""
+
+def random_shift(x, dim, lo, hi):
+    """Slide every sample along one axis by its own random amount (lo..hi steps); emptied slots become 0.
+
+    Each sample gets a different shift on purpose. Shifting a whole batch the same way
+    makes BatchNorm's running statistics jump around, and test accuracy jumps with them.
+    """
+    B, n = len(x), x.shape[dim]
+    k = torch.randint(lo, hi + 1, (B, 1), device=x.device)
+    src = torch.arange(n, device=x.device) - k                # (B, n): which old position lands in each slot
+    shape = [B, 1, 1, 1]
+    shape[dim] = n                                            # so src lines up with the axis being shifted
+    inside = ((src >= 0) & (src < n)).view(shape)             # slots whose source fell off the edge stay empty
+    return x.gather(dim, src.clamp(0, n - 1).view(shape).expand_as(x)) * inside
+
+
+def augment_data(x, noise_level):
+    """Return a randomly shifted copy of a training batch x: (B, 30, 20, 20).
+
+    The label does not change if the gesture starts a little later or the velocity
+    image moves by one pixel, so the model sees a slightly different version of
+    every sample each epoch and cannot simply memorize them.
+    """
+    x = random_shift(x, 1, 0, 6)     # time: start 0..6 frames later (clips are ~16 frames, zero-padded to 30)
+    x = random_shift(x, 2, -1, 1)    # velocity image: one pixel either way, on each axis
+    x = random_shift(x, 3, -1, 1)
+    return x
 
 def generate_splits(rng, X, use_validation, lodo_domain, lodo_idx, meta):
     if lodo_domain is None:
@@ -87,7 +114,8 @@ def train_model(
     use_validation: bool = True,
     lodo_domain = None,
     lodo_idx = None,
-    cached_data = None
+    cached_data = None,
+    use_pre_parsed_data = False
 ) -> nn.Module:
     """Train with validation, or use an 80/20 train/test split.
 
@@ -100,11 +128,18 @@ def train_model(
     if cached_data is not None:
         X, y, classes, meta = cached_data
     else:
-        #load the metadata (path, date, room, user, gesture, location, orientation, repetition)
-        meta = wd.load_metadata()
-        meta = meta[meta.gesture.isin(wd.COMMON_GESTURES)].reset_index(drop=True)
-        print(f"{len(meta)} samples of {len(wd.COMMON_GESTURES)} gestures")
-        X, y, classes = wd.load_arrays(meta)
+        if not use_pre_parsed_data:
+            #load the metadata (path, date, room, user, gesture, location, orientation, repetition)
+            meta = wd.load_metadata()
+            meta = meta[meta.gesture.isin(wd.COMMON_GESTURES)].reset_index(drop=True)
+            print(f"{len(meta)} samples of {len(wd.COMMON_GESTURES)} gestures")
+            X, y, classes = wd.load_arrays(meta)
+        else:
+            meta = pd.read_csv(wd.PRE_PARSED_DATA_PATH / "meta.csv")
+            X = np.load(wd.PRE_PARSED_DATA_PATH / "X.npy")
+            y = np.load(wd.PRE_PARSED_DATA_PATH / "y.npy")
+            with open(wd.PRE_PARSED_DATA_PATH / "classes.txt", "r", encoding="utf-8") as f:
+                classes = f.read().splitlines()
 
     assert (lodo_domain is None) == (lodo_idx is None), "lodo_domain and lodo_idx must be specified together."
     assert (lodo_domain is None) or (lodo_domain in meta.columns), "lodo_domain must be a column in the metadata."

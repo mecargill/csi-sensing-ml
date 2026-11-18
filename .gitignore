@@ -2,3 +2,4 @@ Multitask/
 .*
 BVP/
 __*
+*.npy

@@ -24,7 +24,7 @@ COMMON_GESTURES = [
     "Draw-O(H)",
     "Draw-Zigzag(H)",
 ]
-
+PRE_PARSED_DATA_PATH = Path(__file__).resolve().parent / "pre_parsed_data"
 ROOT = Path(__file__).resolve().parent / "BVP"
 
 ROOM = {"20181109": 1, "20181112": 1, "20181115": 1, "20181117": 2, "20181118": 2, "20181121": 1,
@@ -102,3 +102,14 @@ def load_arrays(meta, T=30):
     #shape of X is (N, H, W, T) and we are changing it to (N, T, H, W)
     X = X.transpose(0, 3, 1, 2)
     return X, y, classes
+
+def pre_parse_data():
+    meta = load_metadata()
+    meta = meta[meta.gesture.isin(COMMON_GESTURES)].reset_index(drop=True)
+    print(f"{len(meta)} samples of {len(COMMON_GESTURES)} gestures")
+    X, y, classes = load_arrays(meta)
+    np.save(PRE_PARSED_DATA_PATH / "X.npy", X)
+    np.save(PRE_PARSED_DATA_PATH / "y.npy", y)
+    with open(PRE_PARSED_DATA_PATH / "classes.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(classes))
+    meta.to_csv(PRE_PARSED_DATA_PATH / "meta.csv", index=False)
