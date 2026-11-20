@@ -8,21 +8,51 @@ import pandas as pd
 import widar_data as wd
 
 
-def normalize(X):
-    """Normalize each sample across time and space, preserving relative changes over time.
+def filter_preparsed_data(X, y, classes, meta, all_gestures):
+    if len(X) != len(y) or len(y) != len(meta):
+        raise ValueError("Pre-parsed X, y, and metadata must contain the same number of samples.")
 
-    Widar instead normalizes each time instant independently.
-    """
-    minimum = X.min(axis=(1, 2, 3), keepdims=True)
-    maximum = X.max(axis=(1, 2, 3), keepdims=True)
-    return (X - minimum) / (maximum - minimum + 1e-8)
+    y = np.asarray(y)
+    if y.ndim != 1 or (y.size and (y.min() < 0 or y.max() >= len(classes))):
+        raise ValueError("Pre-parsed labels do not match the saved classes.")
+    if not np.array_equal(np.asarray(classes)[y], meta.gesture.to_numpy()):
+        raise ValueError("Pre-parsed labels and metadata gestures are not aligned.")
 
-"""
-def augment_data(X: torch.Tensor, noise_level: float = 0.01) -> torch.Tensor:
-    ""Apply data augmentation to the input tensor X.""
-    # In experiments, this augmentation has reduced performance.
-    noise = torch.randn_like(X) * noise_level
-    return (X + noise).clamp(0.0, 1.0)"""
+    keep = np.ones(len(meta), dtype=bool)
+    if not all_gestures:
+        keep &= meta.gesture.isin(wd.COMMON_GESTURES).to_numpy()
+    suspect = (meta.date.astype(str) == "20181109") & (meta.gesture == "Slide")
+    keep &= ~suspect.to_numpy()
+
+    indices = np.flatnonzero(keep)
+    meta = meta.iloc[indices].reset_index(drop=True)
+    X = X[indices]
+    classes = sorted(meta.gesture.unique())
+    if not classes:
+        raise ValueError("No samples remain after filtering the pre-parsed data.")
+    class_to_index = {gesture: index for index, gesture in enumerate(classes)}
+    y = meta.gesture.map(class_to_index).to_numpy(dtype=np.int64)
+    return X, y, classes, meta
+
+
+def normalize(X, mode="sample_minmax", fit_indices=None):
+    """Normalize Widar samples using the selected training recipe."""
+    if mode == "sample_minmax":
+        minimum = X.min(axis=(1, 2, 3), keepdims=True)
+        maximum = X.max(axis=(1, 2, 3), keepdims=True)
+        return (X - minimum) / (maximum - minimum + 1e-8)
+    if mode == "global_max":
+        return X / (X.max() + 1e-8)
+    if mode == "fit_max_sqrt":
+        if fit_indices is None or len(fit_indices) == 0:
+            raise ValueError("fit_indices must contain training samples for fit_max_sqrt normalization.")
+        scale = X[fit_indices].max()
+        if scale <= 0:
+            raise ValueError("fit_max_sqrt normalization requires a positive training-data maximum.")
+        return np.sqrt(np.clip(X, 0, None) / scale)
+    raise ValueError(f"Unknown normalization mode: {mode}")
+
+
 
 def random_shift(x, dim, lo, hi):
     """Slide every sample along one axis by its own random amount (lo..hi steps); emptied slots become 0.
@@ -39,7 +69,7 @@ def random_shift(x, dim, lo, hi):
     return x.gather(dim, src.clamp(0, n - 1).view(shape).expand_as(x)) * inside
 
 
-def augment_data(x, noise_level):
+def augment_data(x):
     """Return a randomly shifted copy of a training batch x: (B, 30, 20, 20).
 
     The label does not change if the gesture starts a little later or the velocity
@@ -110,29 +140,37 @@ def train_model(
     seed: int = 0,
     optimizer: Optional[Callable[[nn.Module], torch.optim.Optimizer]] = None,
     anneal: bool = False,
-    augment: float = 0.0,
+    augment: bool = False,
     use_validation: bool = True,
+    one_cycle: bool = False,
+    normalization: str = "sample_minmax",
+    all_gestures: bool = False,
     lodo_domain = None,
     lodo_idx = None,
     cached_data = None,
     use_pre_parsed_data = False
 ) -> nn.Module:
-    """Train with validation, or use an 80/20 train/test split.
+    """Train with random or LODO splits and an optional validation subset.
 
     With validation enabled, save the epoch with the best validation accuracy.
-    Without validation, save the final epoch and evaluate test accuracy once.
+    Without validation, train on all non-test samples and save the final epoch.
+    LODO test indices contain the entire held-out domain.
     """
+
     if epochs < 1:
         raise ValueError("epochs must be at least 1.")
-    
+    if anneal and one_cycle:
+        raise ValueError("anneal and one_cycle cannot both be enabled.")
+    if use_pre_parsed_data and (cached_data is not None):
+        print("WARNING: preparsed data was true... but cached data was passed. cached data was used.")
+
     if cached_data is not None:
         X, y, classes, meta = cached_data
     else:
         if not use_pre_parsed_data:
             #load the metadata (path, date, room, user, gesture, location, orientation, repetition)
             meta = wd.load_metadata()
-            meta = meta[meta.gesture.isin(wd.COMMON_GESTURES)].reset_index(drop=True)
-            print(f"{len(meta)} samples of {len(wd.COMMON_GESTURES)} gestures")
+            print(f"{len(meta)} samples of {meta.gesture.nunique()} gestures")
             X, y, classes = wd.load_arrays(meta)
         else:
             meta = pd.read_csv(wd.PRE_PARSED_DATA_PATH / "meta.csv")
@@ -140,18 +178,20 @@ def train_model(
             y = np.load(wd.PRE_PARSED_DATA_PATH / "y.npy")
             with open(wd.PRE_PARSED_DATA_PATH / "classes.txt", "r", encoding="utf-8") as f:
                 classes = f.read().splitlines()
+    X, y, classes, meta = filter_preparsed_data(
+        X, y, classes, meta, all_gestures
+    )
 
     assert (lodo_domain is None) == (lodo_idx is None), "lodo_domain and lodo_idx must be specified together."
     assert (lodo_domain is None) or (lodo_domain in meta.columns), "lodo_domain must be a column in the metadata."
     assert (lodo_idx is None) or (lodo_idx in meta[lodo_domain].values), "lodo_idx must be a value in the specified lodo_domain column."
     
-    # X has shape (N, T, H, W). Normalize the data to [0, 1]
-    X = normalize(X)
-
     #generate the splits
     rng = np.random.default_rng(seed)
     torch.manual_seed(seed)
     train_idx, val_idx, test_idx = generate_splits(rng, X, use_validation, lodo_domain, lodo_idx, meta)
+    # Fit-set normalization uses only training samples, never validation or LODO test data.
+    X = normalize(X, mode=normalization, fit_indices=train_idx)
 
     #select the device for training
     if torch.backends.mps.is_available():
@@ -176,15 +216,62 @@ def train_model(
     else:
         optimizer = optimizer(model)
 
-    scheduler = (
-        torch.optim.lr_scheduler.CosineAnnealingLR(
+    if one_cycle:
+        steps_per_epoch = (len(train_idx) + batch_size - 1) // batch_size
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=1e-3,
+            total_steps=epochs * steps_per_epoch,
+        )
+    elif anneal:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
             T_max=epochs,
             eta_min=1e-5,
         )
-        if anneal
-        else None
+    else:
+        scheduler = None
+
+    model_name = getattr(model_factory, "__name__", type(model_factory).__name__)
+    print("Training settings:")
+    print(f"  model: {model_name}")
+    print(f"  output: {output_path}")
+    print(f"  epochs: {epochs}; batch size: {batch_size}; seed: {seed}")
+    print(f"  data source: {'cached_data' if cached_data is not None else 'pre-parsed' if use_pre_parsed_data else 'raw BVP'}")
+    gesture_selection = (
+        "cached class set" if cached_data is not None
+        else "all gestures" if all_gestures
+        else "common gestures"
     )
+    print(f"  classes: {gesture_selection} ({len(classes)} classes)")
+    print(f"  normalization: {normalization}")
+    print(f"  augmentation: {'random shifts' if augment else 'off'}")
+    print(f"  validation: {'on' if use_validation else 'off'}")
+    split_description = (
+        f"LODO {lodo_domain}={lodo_idx}" if lodo_domain is not None else "random split"
+    )
+    print(
+        f"  split: {split_description}; "
+        f"train={len(train_idx)}, validation={len(val_idx)}, test={len(test_idx)}"
+    )
+    print(f"  loss: {loss_fn.__class__.__name__}")
+    print(f"  optimizer: {optimizer.__class__.__name__}")
+    for group_index, group in enumerate(optimizer.param_groups, start=1):
+        optimizer_options = (
+            f"{name}={group[name]}"
+            for name in ("lr", "weight_decay", "momentum", "alpha", "betas", "eps")
+            if name in group
+        )
+        print(f"    group {group_index}: {', '.join(optimizer_options)}")
+    if one_cycle:
+        print(
+            f"  scheduler: OneCycleLR (max_lr=1e-3, "
+            f"total_steps={epochs * steps_per_epoch}, per batch)"
+        )
+    elif anneal:
+        print(f"  scheduler: CosineAnnealingLR (T_max={epochs}, eta_min=1e-5, per epoch)")
+    else:
+        print("  scheduler: off")
 
     best_val_acc = -1.0
     best_epoch = 0
@@ -202,8 +289,8 @@ def train_model(
             batch_inputs = X_t[batch_indices].to(device)
             targets = y_t[batch_indices].to(device)
 
-            if augment > 0:
-                batch_inputs = augment_data(batch_inputs, noise_level=augment)
+            if augment:
+                batch_inputs = augment_data(batch_inputs)
 
             logits = model(batch_inputs)
             loss = loss_fn(logits, targets)
@@ -211,6 +298,8 @@ def train_model(
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+            if one_cycle:
+                scheduler.step()
             total_loss += loss.detach() * len(batch)
             train_correct += (logits.detach().argmax(dim=1) == targets).sum()
 

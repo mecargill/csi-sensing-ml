@@ -105,8 +105,7 @@ def load_arrays(meta, T=30):
 
 def pre_parse_data():
     meta = load_metadata()
-    meta = meta[meta.gesture.isin(COMMON_GESTURES)].reset_index(drop=True)
-    print(f"{len(meta)} samples of {len(COMMON_GESTURES)} gestures")
+    print(f"{len(meta)} samples of {meta.gesture.nunique()} gestures")
     X, y, classes = load_arrays(meta)
     np.save(PRE_PARSED_DATA_PATH / "X.npy", X)
     np.save(PRE_PARSED_DATA_PATH / "y.npy", y)

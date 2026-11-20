@@ -1,0 +1,39 @@
+--------------------------------------------------------------------------------------------------------------
+dataset: all rooms, common gestures
+test: random
+train: random
+
+LSTM: 91.3
+resnetv1: 90.5
+--------------------------------------------------------------------------------------------------------------
+dataset: all rooms, common gestures
+test: 3
+train: 1 & 2
+
+LSTM: 90.5
+--------------------------------------------------------------------------------------------------------------
+dataset: all rooms, common gestures, minus "suspect"
+test: 3
+train: room 1 & 2
+
+LSTM: 91.4
+--------------------------------------------------------------------------------------------------------------
+dataset: all rooms, all gestures, minus "suspect"
+test: room 3 (same test set as above)
+train: 100% of room 1 & 2 
+
+LSTM: 83.4
+--------------------------------------------------------------------------------------------------------------
+dataset: all rooms, all gestures, minus "suspect"
+test: room 3 (same test set as above)
+train: 80% of room 1 & 2 
+
+resnetv2: 91.1
+--------------------------------------------------------------------------------------------------------------
+dataset: room 1 & 2, all gestures, minus "suspect"
+test: random
+train: random 80%
+
+resnetv2: 93.5
+LSTM: 93.6              (note: used only common gestures to train. train is subset & same test set, so fair comp) 
+--------------------------------------------------------------------------------------------------------------

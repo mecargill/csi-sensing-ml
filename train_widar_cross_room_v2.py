@@ -34,7 +34,7 @@ suspect = (meta.date == "20181109") & (meta.gesture == "Slide")
 meta = meta[~suspect].reset_index(drop=True)             # drop the suspect "Slide" session
 
 X, y, classes = widar_data.load_arrays(meta)             # every gesture, not only COMMON
-X = X.transpose(0, 3, 1, 2)                              # (N, 30, 20, 20) = (sample, time, vx, vy)
+
 
 common_cls = [classes.index(g) for g in COMMON]          # the 6 output columns we are graded on
 is_common = np.isin(y, common_cls)
