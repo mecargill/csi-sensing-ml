@@ -1,5 +1,6 @@
 """Run every available LODO split for the configured LSTM and temporal ResNet."""
 from pathlib import Path
+import re
 
 import numpy as np
 import pandas as pd
@@ -38,6 +39,7 @@ class Tee:
 
 log_file = open(LOG_FPATH, "w", buffering=1)
 
+original_stdout = sys.stdout
 sys.stdout = Tee(sys.stdout, log_file)
 
 
@@ -88,11 +90,56 @@ def run_lodo_runs(model_name, model_factory, cached_data, **settings):
             )
 
 
+def export_test_accuracies(log_path):
+    results = []
+    current_run = None
+    in_domain_pattern = re.compile(r"Running in-domain test for (\S+)")
+    lodo_pattern = re.compile(r"Running (\S+): (\w+)=(\S+)")
+    accuracy_pattern = re.compile(r"Test acc ([0-9]*\.?[0-9]+)")
+
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        match = in_domain_pattern.match(line)
+        if match:
+            current_run = {
+                "model": match.group(1),
+                "split": "in_domain",
+                "domain": "",
+                "held_out": "",
+            }
+            continue
+
+        match = lodo_pattern.match(line)
+        if match:
+            current_run = {
+                "model": match.group(1),
+                "split": "lodo",
+                "domain": match.group(2),
+                "held_out": match.group(3),
+            }
+            continue
+
+        match = accuracy_pattern.match(line)
+        if match:
+            if current_run is None:
+                raise ValueError(f"Test accuracy in {log_path} has no associated run header.")
+            results.append({**current_run, "test_accuracy": float(match.group(1))})
+            current_run = None
+
+    if current_run is not None:
+        raise ValueError(f"Run in {log_path} has no final test accuracy.")
+    if not results:
+        raise ValueError(f"No test accuracies found in {log_path}.")
+
+    output_path = log_path.with_name(f"{log_path.stem}_test_accuracies.csv")
+    pd.DataFrame(results).to_csv(output_path, index=False)
+    return output_path
+
+
 if __name__ == "__main__":
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     data = load_cached_data()
-    
+    """
     run_lodo_runs(
         "lstm",
         LSTM,
@@ -105,9 +152,9 @@ if __name__ == "__main__":
         augment=False,
         all_gestures=False,
         use_validation=False,
-    )
+    )"""
     
-
+    
     run_lodo_runs(
         "temporal_resnet_v2",
         TemporalResNet,
@@ -124,3 +171,9 @@ if __name__ == "__main__":
         all_gestures=True,
         use_validation=False,
     )
+
+    sys.stdout.flush()
+    sys.stdout = original_stdout
+    log_file.close()
+    accuracy_csv = export_test_accuracies(LOG_FPATH)
+    print(f"Test accuracies saved to {accuracy_csv}")

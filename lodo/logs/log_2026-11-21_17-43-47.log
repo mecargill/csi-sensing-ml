@@ -1,0 +1,40 @@
+unique rooms: [1 2 3]
+unique users: [ 1  2  3  4  5  6 10 11 12 13 14 15 16 17  7  8  9]
+unique locations: [1 2 3 4 5 6 7 8]
+unique orientations: [1 2 3 4 5]
+total runs: 33
+
+
+--------------------------------------------------------------------------
+Running in-domain test for temporal_resnet_v2 at 2026/11/21 17:43:47
+Time elapsed: 0:00:00
+--------------------------------------------------------------------------
+Using device cuda
+1,906,966 parameters
+Training settings:
+  model: TemporalResNet
+  output: lodo\models\temporal_resnet_v2_in_domain.pt
+  epochs: 100; batch size: 64; seed: 0
+  data source: cached_data
+  classes: all gestures (22 classes)
+  normalization: fit_max_sqrt
+  augmentation: random shifts
+  validation: off
+  split: random split; train=33925, validation=0, test=4785
+  loss: CrossEntropyLoss
+  optimizer: AdamW
+    group 1: lr=3.9999999999999996e-05, weight_decay=0.05, betas=(0.95, 0.999), eps=1e-08
+  scheduler: OneCycleLR (max_lr=1e-3, total_steps=53100, per batch)
+epoch  1  loss 2.536  train acc 0.204  test acc 0.248
+epoch  2  loss 2.288  train acc 0.292  test acc 0.399
+epoch  3  loss 1.989  train acc 0.401  test acc 0.586
+epoch  4  loss 1.718  train acc 0.470  test acc 0.619
+epoch  5  loss 1.494  train acc 0.534  test acc 0.653
+epoch  6  loss 1.323  train acc 0.581  test acc 0.698
+epoch  7  loss 1.201  train acc 0.616  test acc 0.741
+epoch  8  loss 1.116  train acc 0.641  test acc 0.722
+epoch  9  loss 1.054  train acc 0.659  test acc 0.725
+epoch 10  loss 0.990  train acc 0.678  test acc 0.746
+epoch 11  loss 0.958  train acc 0.686  test acc 0.758
+epoch 12  loss 0.931  train acc 0.695  test acc 0.784
+epoch 13  loss 0.895  train acc 0.707  test acc 0.815
