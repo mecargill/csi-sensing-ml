@@ -19,7 +19,7 @@ DOMAINS = ("room", "user", "location", "orientation")
 OUTPUT_DIR = Path("lodo")
 MODEL_DIR = OUTPUT_DIR / Path("models")
 now = datetime.now()
-LOG_FPATH = OUTPUT_DIR / Path("logs") / f"log_{now.strftime("%Y-%m-%d_%H-%M-%S")}.log"
+LOG_FPATH = OUTPUT_DIR / Path("logs") / f"log_{now.strftime('%Y-%m-%d_%H-%M-%S')}.log"
 
 
 class Tee:
