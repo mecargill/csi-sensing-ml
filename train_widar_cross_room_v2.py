@@ -158,7 +158,7 @@ for epoch in range(EPOCHS):
     print(f"epoch {epoch + 1:2d}  loss {total_loss / len(fit_idx):.3f}  "
           f"same-room acc {accuracy(same_room_idx):.3f}  new-room acc {accuracy(new_room_idx):.3f}")
 
-torch.save(model.state_dict(), f"gesture_cross_room{TEST_ROOM}_v2.pt")
+torch.save(model.state_dict(), f"results/gesture_cross_room{TEST_ROOM}_v2.pt")
 
 # ----------------------------------------------------------------------------- 6. RESULTS
 same_pred, same_true = predict(same_room_idx), y[same_room_idx]

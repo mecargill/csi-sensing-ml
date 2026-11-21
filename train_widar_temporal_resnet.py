@@ -167,7 +167,7 @@ for epoch in range(EPOCHS):
     print(f"epoch {epoch + 1:2d}  loss {total_loss / len(train_idx):.3f}  "
           f"train acc {accuracy(train_idx):.3f}  test acc {accuracy(test_idx):.3f}")
 
-torch.save(model.state_dict(), "gesture_temporal_resnet.pt")
+torch.save(model.state_dict(), "results/gesture_temporal_resnet.pt")
 
 # ----------------------------------------------------------------------------- 6. RESULTS
 pred, true = predict(test_idx), y[test_idx]
