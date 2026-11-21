@@ -82,6 +82,7 @@ def augment_data(x):
     return x
 
 def generate_splits(rng, X, use_validation, lodo_domain, lodo_idx, meta):
+    #regardless of what it's trained on, it should only be tested on the 6 common gestures, otherwise its unfair
     if lodo_domain is None:
         indices = rng.permutation(len(X))
         if use_validation:
@@ -95,7 +96,6 @@ def generate_splits(rng, X, use_validation, lodo_domain, lodo_idx, meta):
             train_idx = indices[:n_train]
             val_idx = np.empty(0, dtype=indices.dtype)
             test_idx = indices[n_train:]
-        return train_idx, val_idx, test_idx
     else:
         domain = meta[lodo_domain].to_numpy()
         test_idx = np.flatnonzero(domain == lodo_idx)
@@ -109,7 +109,8 @@ def generate_splits(rng, X, use_validation, lodo_domain, lodo_idx, meta):
             train_idx = other_idx
             val_idx = np.empty(0, dtype=int)
 
-        return train_idx, val_idx, test_idx
+    test_idx = test_idx[meta.gesture.iloc[test_idx].isin(wd.COMMON_GESTURES).to_numpy()]
+    return train_idx, val_idx, test_idx
 
 #create an easy way to check accuracy
 def accuracy(model, X_t, y_t, indices, device, batch_size):
