@@ -64,7 +64,7 @@ def run_lodo_runs(model_name, model_factory, cached_data, **settings):
     print(f"Running in-domain test for {model_name} at {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
     print(f"Time elapsed: {timedelta(seconds=round(time.perf_counter() - prgrm_start))}")
     print("--------------------------------------------------------------------------")
-    output_path = OUTPUT_DIR / f"{model_name}_in_domain.pt"
+    output_path = MODEL_DIR / f"{model_name}_in_domain.pt"
     wt.train_model(
                     model_factory,
                     str(output_path),
@@ -73,7 +73,7 @@ def run_lodo_runs(model_name, model_factory, cached_data, **settings):
                 )
     for domain in DOMAINS:
         for lodo_idx in pd.unique(meta[domain].dropna()):
-            output_path = OUTPUT_DIR / f"{model_name}_{domain}_{lodo_idx}.pt"
+            output_path = MODEL_DIR / f"{model_name}_{domain}_{lodo_idx}.pt"
             print("\n\n--------------------------------------------------------------------------")
             print(f"Running {model_name}: {domain}={lodo_idx} at {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
             print(f"Time elapsed: {timedelta(seconds=round(time.perf_counter() - prgrm_start))}")

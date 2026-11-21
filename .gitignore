@@ -3,3 +3,5 @@ Multitask/
 BVP/
 __*
 *.npy
+*.pt
+pre_parsed_data/
