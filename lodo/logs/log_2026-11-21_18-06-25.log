@@ -1,0 +1,11 @@
+unique rooms: [1 2 3]
+unique users: [ 1  2  3  4  5  6 10 11 12 13 14 15 16 17  7  8  9]
+unique locations: [1 2 3 4 5 6 7 8]
+unique orientations: [1 2 3 4 5]
+total runs: 33
+
+
+--------------------------------------------------------------------------
+Running in-domain test for temporal_resnet_v2 at 2026/11/21 18:06:25
+Time elapsed: 0:00:00
+--------------------------------------------------------------------------

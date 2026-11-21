@@ -110,10 +110,13 @@ def generate_splits(rng, X, use_validation, lodo_domain, lodo_idx, meta):
             val_idx = np.empty(0, dtype=int)
 
     test_idx = test_idx[meta.gesture.iloc[test_idx].isin(wd.COMMON_GESTURES).to_numpy()]
+    val_idx = val_idx[meta.gesture.iloc[val_idx].isin(wd.COMMON_GESTURES).to_numpy()]
     return train_idx, val_idx, test_idx
 
 #create an easy way to check accuracy
-def accuracy(model, X_t, y_t, indices, device, batch_size):
+
+def accuracy(model, X_t, y_t, common_indices, indices, device, batch_size):
+
     was_training = model.training
     model.eval()
     correct = torch.zeros((), device=device)
@@ -126,7 +129,9 @@ def accuracy(model, X_t, y_t, indices, device, batch_size):
             )
             inputs = X_t[batch_indices].to(device)
             targets = y_t[batch_indices].to(device)
-            correct += (model(inputs).argmax(dim=1) == targets).sum()
+            scores = model(inputs).index_select(1, common_indices)
+            predictions = common_indices[scores.argmax(dim=1)]
+            correct += (predictions == targets).sum()
 
     model.train(was_training)
     return correct.item() / len(indices)
@@ -182,7 +187,7 @@ def train_model(
     X, y, classes, meta = filter_preparsed_data(
         X, y, classes, meta, all_gestures
     )
-
+    
     assert (lodo_domain is None) == (lodo_idx is None), "lodo_domain and lodo_idx must be specified together."
     assert (lodo_domain is None) or (lodo_domain in meta.columns), "lodo_domain must be a column in the metadata."
     assert (lodo_idx is None) or (lodo_idx in meta[lodo_domain].values), "lodo_idx must be a value in the specified lodo_domain column."
@@ -205,6 +210,9 @@ def train_model(
 
     X_t = torch.as_tensor(X)
     y_t = torch.tensor(y, dtype=torch.long)
+    common_indices = torch.tensor(
+        [classes.index(g) for g in wd.COMMON_GESTURES], device=device
+    )
 
     #create the model, loss, optimizer, and LR scheduler
     model = model_factory(X.shape[1], len(classes)).to(device)
@@ -303,8 +311,8 @@ def train_model(
         train_loss = total_loss.item() / len(train_idx)
         train_acc = train_correct.item() / len(train_idx)
         if use_validation:
-            val_acc = accuracy(model, X_t, y_t, val_idx, device, batch_size)
-        test_acc = accuracy(model, X_t, y_t, test_idx, device, batch_size)
+            val_acc = accuracy(model, X_t, y_t, common_indices, val_idx, device, batch_size)
+        test_acc = accuracy(model, X_t, y_t, common_indices, test_idx, device, batch_size)
 
         info = (
             f"epoch {epoch + 1:2d}  loss {train_loss:.3f}  "
@@ -349,7 +357,7 @@ def train_model(
     print(f"Saved model weights to {output_path}")
 
     #final results
-    test_acc = accuracy(model, X_t, y_t, test_idx, device, batch_size)
+    test_acc = accuracy(model, X_t, y_t, common_indices, test_idx, device, batch_size)
     print(f"Test acc {test_acc:.3f}")
     model.eval()
     return model
