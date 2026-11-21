@@ -238,7 +238,7 @@ def train_model(
     print(f"  output: {output_path}")
     print(f"  epochs: {epochs}; batch size: {batch_size}; seed: {seed}")
     print(f"  data source: {'cached_data' if cached_data is not None else 'pre-parsed' if use_pre_parsed_data else 'raw BVP'}")
-    print(f"  classes: {"all gestures" if all_gestures else "common gestures"} ({len(classes)} classes)")
+    print(f"  classes: {'all gestures' if all_gestures else 'common gestures'} ({len(classes)} classes)")
     print(f"  normalization: {normalization}")
     print(f"  augmentation: {'random shifts' if augment else 'off'}")
     print(f"  validation: {'on' if use_validation else 'off'}")
