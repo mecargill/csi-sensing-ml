@@ -61,7 +61,7 @@ def run_lodo_runs(model_name, model_factory, cached_data, **settings):
     meta = cached_data[3]
     
     print("\n\n--------------------------------------------------------------------------")
-    print(f"Running in-domain test for {model_name} at {datetime.now().strftime("%Y/%m/%d %H:%M:%S")}")
+    print(f"Running in-domain test for {model_name} at {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
     print(f"Time elapsed: {timedelta(seconds=round(time.perf_counter() - prgrm_start))}")
     print("--------------------------------------------------------------------------")
     output_path = OUTPUT_DIR / f"{model_name}_in_domain.pt"
