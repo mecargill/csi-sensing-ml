@@ -8,13 +8,37 @@ import torch
 import widar_data as wd
 import widar_training as wt
 from widar_models import LSTM, TemporalResNet
-
+import sys
+from datetime import datetime, timedelta
+import time
 
 EPOCHS = 100
 BATCH_SIZE = 64
 SEED = 0
 DOMAINS = ("room", "user", "location", "orientation")
 OUTPUT_DIR = Path("lodo")
+MODEL_DIR = OUTPUT_DIR / Path("models")
+now = datetime.now()
+LOG_FPATH = OUTPUT_DIR / Path("logs") / f"log_{now.strftime("%Y-%m-%d_%H-%M-%S")}.log"
+
+
+class Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, message):
+        for stream in self.streams:
+            stream.write(message)
+            stream.flush()
+
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
+
+
+log_file = open(LOG_FPATH, "w", buffering=1)
+
+sys.stdout = Tee(sys.stdout, log_file)
 
 
 def load_cached_data():
@@ -32,10 +56,13 @@ def load_cached_data():
     print(f"total runs: {total_runs}")
     return (X, y, classes, meta)
 
+prgrm_start = time.perf_counter()
 def run_lodo_runs(model_name, model_factory, cached_data, **settings):
     meta = cached_data[3]
+    
     print("\n\n--------------------------------------------------------------------------")
-    print(f"Running in-domain test for {model_name}")
+    print(f"Running in-domain test for {model_name} at {datetime.now().strftime("%Y/%m/%d %H:%M:%S")}")
+    print(f"Time elapsed: {timedelta(seconds=round(time.perf_counter() - prgrm_start))}")
     print("--------------------------------------------------------------------------")
     output_path = OUTPUT_DIR / f"{model_name}_in_domain.pt"
     wt.train_model(

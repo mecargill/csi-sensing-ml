@@ -238,17 +238,12 @@ def train_model(
     print(f"  output: {output_path}")
     print(f"  epochs: {epochs}; batch size: {batch_size}; seed: {seed}")
     print(f"  data source: {'cached_data' if cached_data is not None else 'pre-parsed' if use_pre_parsed_data else 'raw BVP'}")
-    gesture_selection = (
-        "cached class set" if cached_data is not None
-        else "all gestures" if all_gestures
-        else "common gestures"
-    )
-    print(f"  classes: {gesture_selection} ({len(classes)} classes)")
+    print(f"  classes: {"all gestures" if all_gestures else "common gestures"} ({len(classes)} classes)")
     print(f"  normalization: {normalization}")
     print(f"  augmentation: {'random shifts' if augment else 'off'}")
     print(f"  validation: {'on' if use_validation else 'off'}")
     split_description = (
-        f"LODO {lodo_domain}={lodo_idx}" if lodo_domain is not None else "random split"
+        f"Held out {lodo_domain} number {lodo_idx}" if lodo_domain is not None else "random split"
     )
     print(
         f"  split: {split_description}; "
