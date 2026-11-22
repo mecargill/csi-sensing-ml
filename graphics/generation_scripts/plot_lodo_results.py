@@ -528,29 +528,14 @@ def load_confidence_gap_points(models, confidence_path):
     return points
 
 
-def average_ranks(values):
-    order = sorted(range(len(values)), key=values.__getitem__)
-    ranks = [0.0] * len(values)
-    start = 0
-    while start < len(order):
-        end = start + 1
-        while end < len(order) and values[order[end]] == values[order[start]]:
-            end += 1
-        rank = ((start + 1) + end) / 2
-        for index in order[start:end]:
-            ranks[index] = rank
-        start = end
-    return np.asarray(ranks)
-
-
-def spearman_correlation(x_values, y_values):
+def pearson_correlation(x_values, y_values):
     if len(x_values) < 2:
         return float("nan")
-    x_ranks = average_ranks(x_values)
-    y_ranks = average_ranks(y_values)
-    if np.std(x_ranks) == 0 or np.std(y_ranks) == 0:
+    x_values = np.asarray(x_values)
+    y_values = np.asarray(y_values)
+    if np.std(x_values) == 0 or np.std(y_values) == 0:
         return float("nan")
-    return float(np.corrcoef(x_ranks, y_ranks)[0, 1])
+    return float(np.corrcoef(x_values, y_values)[0, 1])
 
 
 def make_confidence_gap_correlation(models, confidence_path):
@@ -591,7 +576,7 @@ def make_confidence_gap_correlation(models, confidence_path):
                 zorder=3,
             )
 
-        rho = spearman_correlation(x_values, y_values)
+        correlation = pearson_correlation(x_values, y_values)
         axis.axhline(0, color="#AAB4BF", linewidth=0.9, linestyle="--", zorder=1)
         axis.axvline(0, color="#AAB4BF", linewidth=0.9, linestyle="--", zorder=1)
         axis.set_ylim(y_min - padding, y_max + padding)
@@ -608,7 +593,7 @@ def make_confidence_gap_correlation(models, confidence_path):
         axis.text(
             0.97,
             0.05,
-            f"Spearman rho = {rho:.2f} (n = {len(model_points)})",
+            f"Pearson r = {correlation:.2f} (n = {len(model_points)})",
             transform=axis.transAxes,
             ha="right",
             va="bottom",
