@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 
@@ -462,6 +463,199 @@ def make_generalization_drop(models):
     return output_path
 
 
+def latest_confidence_csv():
+    confidence_files = list(LOGS.glob("confidence_gaps_*.csv"))
+    if not confidence_files:
+        raise FileNotFoundError(f"No confidence-gap CSV found in {LOGS}")
+    return max(confidence_files, key=lambda path: path.stat().st_mtime)
+
+
+def load_confidence_gap_points(models, confidence_path):
+    model_names = {model_id: display_name for display_name, model_id in MODEL_IDS.items()}
+    expected_keys = {
+        (model_name, domain, held_out)
+        for model_name, results in models.items()
+        for split, domain, held_out in results
+        if split == "lodo"
+    }
+    points = {}
+    required = {"model", "split", "domain", "held_out", "confidence_gap_train_minus_test"}
+
+    with confidence_path.open(newline="", encoding="utf-8-sig") as csv_file:
+        reader = csv.DictReader(csv_file)
+        if not required.issubset(reader.fieldnames or ()):
+            raise ValueError(
+                f"{confidence_path} is missing required columns: {sorted(required)}"
+            )
+
+        for line_number, row in enumerate(reader, start=2):
+            if row["split"] != "lodo":
+                continue
+            if row["model"] not in model_names:
+                raise ValueError(
+                    f"Unexpected model {row['model']!r} in {confidence_path}, line {line_number}"
+                )
+            model_name = model_names[row["model"]]
+            try:
+                domain = row["domain"]
+                held_out = int(row["held_out"])
+                confidence_gap = float(row["confidence_gap_train_minus_test"])
+                if domain not in DOMAINS or not np.isfinite(confidence_gap):
+                    raise ValueError("invalid domain or confidence gap")
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Invalid data at {confidence_path}, line {line_number}: {error}"
+                ) from error
+
+            key = (model_name, domain, held_out)
+            if key not in expected_keys:
+                raise ValueError(f"Unexpected LODO row {key} in {confidence_path}")
+            if key in points:
+                raise ValueError(f"Duplicate confidence gap for {key} in {confidence_path}")
+
+            in_domain_accuracy = models[model_name][("in_domain", "", "")]
+            lodo_accuracy = models[model_name][("lodo", domain, held_out)]
+            points[key] = {
+                "confidence_gap": confidence_gap * 100,
+                "accuracy_drop": (in_domain_accuracy - lodo_accuracy) * 100,
+            }
+
+    missing_keys = expected_keys.difference(points)
+    if missing_keys:
+        raise ValueError(
+            f"{confidence_path} is missing {len(missing_keys)} accuracy-matched LODO confidence rows"
+        )
+    return points
+
+
+def average_ranks(values):
+    order = sorted(range(len(values)), key=values.__getitem__)
+    ranks = [0.0] * len(values)
+    start = 0
+    while start < len(order):
+        end = start + 1
+        while end < len(order) and values[order[end]] == values[order[start]]:
+            end += 1
+        rank = ((start + 1) + end) / 2
+        for index in order[start:end]:
+            ranks[index] = rank
+        start = end
+    return np.asarray(ranks)
+
+
+def spearman_correlation(x_values, y_values):
+    if len(x_values) < 2:
+        return float("nan")
+    x_ranks = average_ranks(x_values)
+    y_ranks = average_ranks(y_values)
+    if np.std(x_ranks) == 0 or np.std(y_ranks) == 0:
+        return float("nan")
+    return float(np.corrcoef(x_ranks, y_ranks)[0, 1])
+
+
+def make_confidence_gap_correlation(models, confidence_path):
+    points = load_confidence_gap_points(models, confidence_path)
+    model_names = ("LSTM", "Temporal ResNet v2")
+    all_drops = [point["accuracy_drop"] for point in points.values()]
+    y_min = min(all_drops)
+    y_max = max(all_drops)
+    padding = max(2, (y_max - y_min) * 0.08)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14.5, 6.5), sharey=True)
+    fig.patch.set_facecolor("#FFFFFF")
+
+    for axis, model_name in zip(axes, model_names):
+        model_points = [
+            (domain, held_out, values)
+            for (point_model, domain, held_out), values in points.items()
+            if point_model == model_name
+        ]
+        x_values = [values["confidence_gap"] for _, _, values in model_points]
+        y_values = [values["accuracy_drop"] for _, _, values in model_points]
+
+        for domain in DOMAINS:
+            domain_points = [
+                (held_out, values)
+                for point_domain, held_out, values in model_points
+                if point_domain == domain
+            ]
+            axis.scatter(
+                [values["confidence_gap"] for _, values in domain_points],
+                [values["accuracy_drop"] for _, values in domain_points],
+                s=58,
+                color=DOMAIN_COLORS[domain],
+                edgecolor="white",
+                linewidth=0.8,
+                alpha=0.9,
+                label=domain.title(),
+                zorder=3,
+            )
+
+        rho = spearman_correlation(x_values, y_values)
+        axis.axhline(0, color="#AAB4BF", linewidth=0.9, linestyle="--", zorder=1)
+        axis.axvline(0, color="#AAB4BF", linewidth=0.9, linestyle="--", zorder=1)
+        axis.set_ylim(y_min - padding, y_max + padding)
+        axis.set_xlabel("Train - test mean max-softmax gap (percentage points)", fontsize=10)
+        axis.set_title(model_name, loc="left", fontsize=12, fontweight="bold")
+        axis.grid(axis="y", color="#DCE2E8", linewidth=0.8)
+        axis.set_axisbelow(True)
+        axis.spines["top"].set_visible(False)
+        axis.spines["right"].set_visible(False)
+        axis.spines["left"].set_color("#AAB4BF")
+        axis.spines["bottom"].set_color("#AAB4BF")
+        axis.tick_params(colors="#48525D")
+        axis.legend(frameon=False, loc="upper left", ncol=2, fontsize=8)
+        axis.text(
+            0.97,
+            0.05,
+            f"Spearman rho = {rho:.2f} (n = {len(model_points)})",
+            transform=axis.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=9,
+            color="#202833",
+            bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.88, "pad": 2},
+        )
+
+    y_ticks = np.arange(np.floor((y_min - padding) / 10) * 10,
+                        np.ceil((y_max + padding) / 10) * 10 + 1, 10)
+    axes[0].set_yticks(y_ticks)
+    axes[0].set_yticklabels([f"{tick:.0f} pp" for tick in y_ticks])
+    axes[0].set_ylabel("Accuracy drop (in-domain - LODO, percentage points)", fontsize=10)
+    fig.suptitle(
+        "Does the confidence gap track accuracy drop?",
+        x=0.06,
+        y=1.045,
+        ha="left",
+        fontsize=18,
+        fontweight="bold",
+    )
+    fig.text(
+        0.06,
+        0.99,
+        "Each point is one matched held-out fold; positive accuracy drop means lower LODO accuracy. "
+        "Colors indicate held-out domain.",
+        ha="left",
+        fontsize=10,
+        color="#48525D",
+    )
+    fig.text(
+        0.06,
+        0.015,
+        f"Confidence source: {confidence_path.name}. Correlations are descriptive across folds; "
+        "domain and test-set composition also vary. ResNet train confidence uses the six common logits "
+        "on all training samples.",
+        ha="left",
+        fontsize=8.5,
+        color="#68737D",
+    )
+    fig.tight_layout(rect=(0.04, 0.06, 0.98, 0.94), w_pad=1.8)
+    output_path = OUTPUT / "lodo_accuracy_drop_vs_confidence_gap.png"
+    fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return output_path
+
+
 def make_fold_detail(models):
     fig, axes = plt.subplots(2, 2, figsize=(14.5, 9.5), sharey=True)
     fig.patch.set_facecolor("#FFFFFF")
@@ -537,11 +731,13 @@ def make_fold_detail(models):
 def main():
     models, training_sizes = load_selected_results()
     OUTPUT.mkdir(parents=True, exist_ok=True)
+    confidence_path = latest_confidence_csv()
     outputs = (
         make_domain_overview(models),
         make_fold_detail(models),
         make_generalization_drop(models),
         make_training_size_accuracy(models, training_sizes),
+        make_confidence_gap_correlation(models, confidence_path),
     )
     for output in outputs:
         print(f"Saved {output}")
