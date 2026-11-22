@@ -139,7 +139,7 @@ if __name__ == "__main__":
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     data = load_cached_data()
-    """
+    
     run_lodo_runs(
         "lstm",
         LSTM,
@@ -152,7 +152,7 @@ if __name__ == "__main__":
         augment=False,
         all_gestures=False,
         use_validation=False,
-    )"""
+    )
     
     
     run_lodo_runs(
